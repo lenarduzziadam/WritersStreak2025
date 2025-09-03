@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:writer_encourager/database_helper.dart';
-import 'package:flutter_quill/flutter_quill.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
+import 'package:pdf/widgets.dart' as pw;
 
 void main() {
   runApp(const MyApp());
@@ -70,12 +71,25 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
+  void _goToSavedWritings() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (context) => const SavedWritingsScreen()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: Text(widget.title),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.list),
+            tooltip: 'View Saved Writings',
+            onPressed: _goToSavedWritings,
+          ),
+        ],
       ),
       body: Center(
         child: Padding(
@@ -101,6 +115,117 @@ class _MyHomePageState extends State<MyHomePage> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+}
+
+class SavedWritingsScreen extends StatefulWidget {
+  const SavedWritingsScreen({Key? key}) : super(key: key);
+
+  @override
+  State<SavedWritingsScreen> createState() => _SavedWritingsScreenState();
+}
+
+class _SavedWritingsScreenState extends State<SavedWritingsScreen> {
+  late Future<List<Map<String, dynamic>>> _writingsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _writingsFuture = DatabaseHelper().getWritings();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Saved Writings'),
+      ),
+      body: FutureBuilder<List<Map<String, dynamic>>>(
+        future: _writingsFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          } else if (snapshot.hasError) {
+            return Center(child: Text('Error: \\${snapshot.error}'));
+          } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            return const Center(child: Text('No writings saved yet.'));
+          }
+          final writings = snapshot.data!;
+          return ListView.builder(
+            itemCount: writings.length,
+            itemBuilder: (context, index) {
+              final writing = writings[index];
+              return ListTile(
+                title: Text(writing['content'] ?? ''),
+                subtitle: Text(writing['createdAt'] ?? ''),
+                trailing: PopupMenuButton<String>(
+                  onSelected: (value) async {
+                    if (value == 'txt') {
+                      await _downloadAsTxt(writing['content'], writing['createdAt']);
+                    } else if (value == 'pdf') {
+                      await _downloadAsPdf(writing['content'], writing['createdAt']);
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(
+                      value: 'txt',
+                      child: Text('Download as .txt'),
+                    ),
+                    const PopupMenuItem(
+                      value: 'pdf',
+                      child: Text('Download as .pdf'),
+                    ),
+                  ],
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _downloadAsTxt(String? content, String? createdAt) async {
+    if (content == null) return;
+    final directory = await getApplicationDocumentsDirectory();
+    final safeDate = (createdAt ?? DateTime.now().toIso8601String()).replaceAll(':', '-');
+    final file = File('${directory.path}/writing_$safeDate.txt');
+    await file.writeAsString(content);
+    _showDownloadDialog(file.path);
+  }
+
+  Future<void> _downloadAsPdf(String? content, String? createdAt) async {
+    if (content == null) return;
+    final pdf = pw.Document();
+    pdf.addPage(
+      pw.Page(
+        build: (pw.Context context) => pw.Center(
+          child: pw.Text(content),
+        ),
+      ),
+    );
+    final directory = await getApplicationDocumentsDirectory();
+    final safeDate = (createdAt ?? DateTime.now().toIso8601String()).replaceAll(':', '-');
+    final file = File('${directory.path}/writing_$safeDate.pdf');
+    await file.writeAsBytes(await pdf.save());
+    _showDownloadDialog(file.path);
+  }
+
+  void _showDownloadDialog(String filePath) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('File Saved'),
+        content: Text('File saved to:\n$filePath'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
       ),
     );
   }
